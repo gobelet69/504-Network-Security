@@ -161,7 +161,8 @@ openssl req -x509 -nodes -days 365 -newkey rsa:2048 \
 
 Remplacer le contenu de `/etc/nginx/nginx.conf` par la configuration suivante:
 
-```nginx
+```bash
+tee /etc/nginx/nginx.conf > /dev/null << 'EOF'
 worker_processes auto;
 
 events {
@@ -270,6 +271,7 @@ http {
         }
     }
 }
+EOF
 ```
 
 Tester puis relancer Nginx:
@@ -374,7 +376,7 @@ ip route
 
 Sur R1:
 
-```text
+```cisco
 enable
 conf t
 interface fastethernet2/0
