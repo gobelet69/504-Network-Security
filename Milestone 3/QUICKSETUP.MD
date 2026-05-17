@@ -1,207 +1,117 @@
-# Milestone 3 - IDS Implementation
+# Milestone 3 - Quick Setup
 
-This document describes the current Milestone 3 implementation for the IDS part of the 504 Network Security project.
+This file gives one copy-paste setup block per machine.
 
-The implementation is based on:
+- Run the **Debian attacker** block on the attack/test machine.
+- Run the **Toolbox reverse proxy** block on the machine that has NGINX logs in `/var/log/nginx/access.log`.
 
-- the reverse proxy from Milestone 2 at `10.0.4.2`;
-- NGINX access logs in `/var/log/nginx/access.log`;
-- attack simulation scripts stored in `/opt/ids-attacks`;
-- a real-time Bash monitor stored at `/opt/monitor_realtime.sh`.
+All scripts are Bash scripts and use only standard shell tools.
 
-Items marked `(new)` are additions required to make the provided files conform more completely to `Milestone 3/Milestone 3.md`.
+## 1. Debian Attacker - Attack Scripts
 
-## 1. Objective
-
-Milestone 3 adds a log-based IDS prototype on top of the reverse proxy.
-
-The goal is to:
-
-- generate normal HTTP traffic;
-- generate malicious HTTP traffic;
-- detect suspicious behavior from NGINX logs;
-- show alerts in real time;
-- analyze logs after the attack;
-- produce evidence for the final presentation.
-
-## 2. Architecture
-
-```text
-External test client / attack host
-        |
-        | HTTP requests
-        v
-Reverse proxy NGINX - 10.0.4.2
-        |
-        | /var/log/nginx/access.log
-        v
-IDS scripts:
-  - real-time monitoring
-  - post-mortem analysis
-  - final report generation
-```
-
-The IDS is log-based. It observes NGINX access logs and detects suspicious activity using indicators such as:
-
-- repeated `404` responses;
-- repeated `401` or `403` responses;
-- dangerous HTTP methods;
-- sensitive file paths;
-- path traversal patterns;
-- SQL injection patterns;
-- XSS patterns;
-- command injection patterns;
-- high request rate;
-- oversized request failures.
-
-## 3. NGINX Logging Configuration
-
-Milestone 2 already configured NGINX access logging. For Milestone 3, confirm that the reverse proxy contains a detailed log format.
-
-Recommended NGINX block:
-
-```nginx
-log_format detailed '$remote_addr - $remote_user [$time_local] '
-                    '"$request" $status $body_bytes_sent '
-                    '"$http_referer" "$http_user_agent"';
-
-access_log /var/log/nginx/access.log detailed;
-error_log /var/log/nginx/error.log warn;
-```
-
-Validation commands:
-
-```bash
-nginx -t
-tail -f /var/log/nginx/access.log
-```
-
-From another terminal:
-
-```bash
-curl -i http://10.0.4.2/
-curl -i http://10.0.4.2/.env
-```
-
-Expected result:
-
-- NGINX config is valid;
-- `access.log` shows source IP, timestamp, request, status code, response size, referer, and user-agent.
-
-## 4. Attack Scripts Provided
-
-The following scripts are already covered by the files provided in the request.
-
-Create the attack directory:
+Copy and run this whole block on the Debian attacker machine:
 
 ```bash
 mkdir -p /opt/ids-attacks
-```
 
-Create all provided attack scripts:
+cat > /opt/ids-attacks/00_normal_activity.sh << 'EOF'
+#!/bin/bash
+TARGET="${1:-http://10.0.4.2}"
 
-```bash
+echo "===== Normal activity test ====="
+curl -s -o /dev/null -w "GET / -> %{http_code}\n" "$TARGET/"
+sleep 2
+curl -s -o /dev/null -w "GET /about -> %{http_code}\n" "$TARGET/about"
+sleep 2
+curl -s -o /dev/null -w "GET /contact -> %{http_code}\n" "$TARGET/contact"
+sleep 2
+curl -s -o /dev/null -w "HEAD / -> %{http_code}\n" -I "$TARGET/"
+sleep 2
+curl -s -o /dev/null -w "GET /favicon.ico -> %{http_code}\n" "$TARGET/favicon.ico"
+echo "===== End normal activity test ====="
+EOF
+
 cat > /opt/ids-attacks/01_sensitive_files.sh << 'EOF'
 #!/bin/bash
-
-TARGET="http://10.0.4.2"
+TARGET="${1:-http://10.0.4.2}"
 
 echo "===== Sensitive files access test ====="
-
 curl -i "$TARGET/.env"
 curl -i "$TARGET/.git/config"
 curl -i "$TARGET/nginx.conf"
 curl -i "$TARGET/passwd"
 curl -i "$TARGET/shadow"
 curl -i "$TARGET/etc/passwd"
-
 echo "===== End sensitive files test ====="
 EOF
 
 cat > /opt/ids-attacks/02_admin_probe.sh << 'EOF'
 #!/bin/bash
-
-TARGET="http://10.0.4.2"
+TARGET="${1:-http://10.0.4.2}"
 
 echo "===== Admin area probing test ====="
-
 curl -i "$TARGET/admin"
 curl -i "$TARGET/admin/"
 curl -i "$TARGET/admin/index.html"
 curl -i "$TARGET/admin/login"
 curl -i "$TARGET/admin/panel"
-
 echo "===== End admin probing test ====="
 EOF
 
 cat > /opt/ids-attacks/03_dangerous_methods.sh << 'EOF'
 #!/bin/bash
-
-TARGET="http://10.0.4.2"
+TARGET="${1:-http://10.0.4.2}"
 
 echo "===== Dangerous HTTP methods test ====="
-
 curl -i -X PUT "$TARGET/"
 curl -i -X DELETE "$TARGET/"
 curl -i -X PATCH "$TARGET/"
 curl -i -X TRACE "$TARGET/"
 curl -i -X OPTIONS "$TARGET/"
-
 echo "===== End dangerous HTTP methods test ====="
 EOF
 
 cat > /opt/ids-attacks/04_directory_traversal.sh << 'EOF'
 #!/bin/bash
-
-TARGET="http://10.0.4.2"
+TARGET="${1:-http://10.0.4.2}"
 
 echo "===== Directory traversal test ====="
-
 curl -i --path-as-is "$TARGET/../../../../etc/passwd"
 curl -i --path-as-is "$TARGET/..%2F..%2F..%2F..%2Fetc%2Fpasswd"
 curl -i --path-as-is "$TARGET/%2e%2e/%2e%2e/%2e%2e/%2e%2e/etc/passwd"
-
 echo "===== End directory traversal test ====="
 EOF
 
 cat > /opt/ids-attacks/05_injection_patterns.sh << 'EOF'
 #!/bin/bash
-
-TARGET="http://10.0.4.2"
+TARGET="${1:-http://10.0.4.2}"
 
 echo "===== Injection pattern test ====="
-
 curl -i "$TARGET/login?user=admin'OR'1'='1"
 curl -i "$TARGET/search?q=union%20select%20username,password%20from%20users"
 curl -i "$TARGET/comment?msg=%3Cscript%3Ealert(1)%3C/script%3E"
 curl -i "$TARGET/test?cmd=cat%20/etc/passwd"
 curl -i "$TARGET/test?exec=id"
 curl -i "$TARGET/test?shell=/bin/bash"
-
 echo "===== End injection pattern test ====="
 EOF
 
 cat > /opt/ids-attacks/06_404_scan.sh << 'EOF'
 #!/bin/bash
-
-TARGET="http://10.0.4.2"
+TARGET="${1:-http://10.0.4.2}"
 
 echo "===== 404 scan test ====="
-
 for i in $(seq 1 30); do
     curl -s -o /dev/null -w "scan /test$i -> %{http_code}\n" "$TARGET/test$i"
 done
-
 echo "===== End 404 scan test ====="
 EOF
 
 cat > /opt/ids-attacks/07_common_sensitive_paths.sh << 'EOF'
 #!/bin/bash
-
-TARGET="http://10.0.4.2"
+TARGET="${1:-http://10.0.4.2}"
 
 echo "===== Common sensitive web paths test ====="
-
 curl -i "$TARGET/phpmyadmin"
 curl -i "$TARGET/wp-admin"
 curl -i "$TARGET/wp-login.php"
@@ -212,361 +122,73 @@ curl -i "$TARGET/config.php"
 curl -i "$TARGET/server-status"
 curl -i "$TARGET/actuator/env"
 curl -i "$TARGET/cgi-bin/"
-
 echo "===== End common sensitive paths test ====="
 EOF
 
 cat > /opt/ids-attacks/08_large_post.sh << 'EOF'
 #!/bin/bash
-
-TARGET="http://10.0.4.2"
+TARGET="${1:-http://10.0.4.2}"
 
 echo "===== Large POST request test ====="
-
 dd if=/dev/zero of=/tmp/bigfile-ids bs=2M count=1 >/dev/null 2>&1
 curl -i -X POST --data-binary @/tmp/bigfile-ids "$TARGET/"
-
 echo "===== End large POST request test ====="
 EOF
 
 cat > /opt/ids-attacks/09_rate_limit_burst.sh << 'EOF'
 #!/bin/bash
-
-TARGET="http://10.0.4.2"
+TARGET="${1:-http://10.0.4.2}"
 
 echo "===== Burst / rate limiting test ====="
-
 for i in $(seq 1 60); do
     curl -s -o /dev/null -w "%{http_code}\n" "$TARGET/" &
 done
-
 wait
-
 echo "===== End burst / rate limiting test ====="
 EOF
 
-chmod +x /opt/ids-attacks/*.sh
-```
-
-### 4.1 Sensitive Files Access Test
-
-File:
-
-```text
-/opt/ids-attacks/01_sensitive_files.sh
-```
-
-Purpose:
-
-- tests access to `.env`;
-- tests access to `.git/config`;
-- tests access to `nginx.conf`;
-- tests access to `passwd`, `shadow`, and `etc/passwd`.
-
-Run:
-
-```bash
-/opt/ids-attacks/01_sensitive_files.sh
-```
-
-Expected IDS result:
-
-- `SENSITIVE PATH` alerts;
-- possible `403` or `404` responses depending on NGINX rules.
-
-### 4.2 Admin Area Probing
-
-File:
-
-```text
-/opt/ids-attacks/02_admin_probe.sh
-```
-
-Purpose:
-
-- tests `/admin`;
-- tests `/admin/`;
-- tests `/admin/index.html`;
-- tests `/admin/login`;
-- tests `/admin/panel`.
-
-Run:
-
-```bash
-/opt/ids-attacks/02_admin_probe.sh
-```
-
-Expected IDS result:
-
-- `FORBIDDEN`, `REPEATED FORBIDDEN`, or `DIRECTORY SCAN` alerts.
-
-### 4.3 Dangerous HTTP Methods
-
-File:
-
-```text
-/opt/ids-attacks/03_dangerous_methods.sh
-```
-
-Purpose:
-
-- tests `PUT`;
-- tests `DELETE`;
-- tests `PATCH`;
-- tests `TRACE`;
-- tests `OPTIONS`.
-
-Run:
-
-```bash
-/opt/ids-attacks/03_dangerous_methods.sh
-```
-
-Expected IDS result:
-
-- `DANGEROUS METHOD` alerts.
-
-### 4.4 Directory Traversal
-
-File:
-
-```text
-/opt/ids-attacks/04_directory_traversal.sh
-```
-
-Purpose:
-
-- tests raw `../../../../etc/passwd`;
-- tests encoded traversal using `%2F`;
-- tests encoded traversal using `%2e%2e`.
-
-Run:
-
-```bash
-/opt/ids-attacks/04_directory_traversal.sh
-```
-
-Expected IDS result:
-
-- `Path Traversal`;
-- `ATTACK DETECTED` after repeated exploit patterns.
-
-### 4.5 Injection Patterns
-
-File:
-
-```text
-/opt/ids-attacks/05_injection_patterns.sh
-```
-
-Purpose:
-
-- SQL injection;
-- XSS;
-- command injection;
-- suspicious shell parameters.
-
-Run:
-
-```bash
-/opt/ids-attacks/05_injection_patterns.sh
-```
-
-Expected IDS result:
-
-- `SQL Injection`;
-- `XSS`;
-- `Command Injection`;
-- `ATTACK DETECTED`.
-
-### 4.6 404 Scan
-
-File:
-
-```text
-/opt/ids-attacks/06_404_scan.sh
-```
-
-Purpose:
-
-- generates 30 requests to non-existing paths.
-
-Run:
-
-```bash
-/opt/ids-attacks/06_404_scan.sh
-```
-
-Expected IDS result:
-
-- `MULTIPLE 404`;
-- `DIRECTORY SCAN`.
-
-### 4.7 Common Sensitive Web Paths
-
-File:
-
-```text
-/opt/ids-attacks/07_common_sensitive_paths.sh
-```
-
-Purpose:
-
-- tests common exposed paths such as `phpmyadmin`, `wp-admin`, backup files, SQL dumps, `server-status`, `actuator/env`, and `cgi-bin`.
-
-Run:
-
-```bash
-/opt/ids-attacks/07_common_sensitive_paths.sh
-```
-
-Expected IDS result:
-
-- `SENSITIVE PATH`;
-- `DIRECTORY SCAN` if many return `404`.
-
-### 4.8 Large POST Request
-
-File:
-
-```text
-/opt/ids-attacks/08_large_post.sh
-```
-
-Purpose:
-
-- creates a 2 MB file;
-- sends it as a POST body to the reverse proxy.
-
-Run:
-
-```bash
-/opt/ids-attacks/08_large_post.sh
-```
-
-Expected IDS result:
-
-- `LARGE REQUEST`;
-- HTTP `413` if NGINX `client_max_body_size` is `1m`.
-
-### 4.9 Burst / Rate Limiting
-
-File:
-
-```text
-/opt/ids-attacks/09_rate_limit_burst.sh
-```
-
-Purpose:
-
-- sends 60 parallel requests to the reverse proxy.
-
-Run:
-
-```bash
-/opt/ids-attacks/09_rate_limit_burst.sh
-```
-
-Expected IDS result:
-
-- `FLOOD / DOS`;
-- possible `503` or `429` depending on NGINX rate limiting behavior.
-
-## 5. Normal Activity Script (new)
-
-Milestone 3 requires normal browsing traffic to prove that the IDS can distinguish normal behavior from attacks.
-
-Create:
-
-```bash
-cat > /opt/ids-attacks/00_normal_activity.sh << 'EOF'
-#!/bin/bash
-
-TARGET="${1:-http://10.0.4.2}"
-
-echo "===== Normal activity test ====="
-
-curl -s -o /dev/null -w "GET / -> %{http_code}\n" "$TARGET/"
-sleep 2
-
-curl -s -o /dev/null -w "GET /about -> %{http_code}\n" "$TARGET/about"
-sleep 2
-
-curl -s -o /dev/null -w "GET /contact -> %{http_code}\n" "$TARGET/contact"
-sleep 2
-
-curl -s -o /dev/null -w "HEAD / -> %{http_code}\n" -I "$TARGET/"
-sleep 2
-
-curl -s -o /dev/null -w "GET /favicon.ico -> %{http_code}\n" "$TARGET/favicon.ico"
-
-echo "===== End normal activity test ====="
-EOF
-
-chmod +x /opt/ids-attacks/00_normal_activity.sh
-```
-
-Run:
-
-```bash
-/opt/ids-attacks/00_normal_activity.sh
-```
-
-Expected IDS result:
-
-- `OK`, `INFO`, or low-volume `404`;
-- no `CRITICAL` alert unless the application does not contain the tested pages and thresholds are too low.
-
-## 6. Dedicated Brute Force Script (new)
-
-The provided admin probing script is useful, but Milestone 3 specifically asks for repeated login or admin attempts. Add a dedicated script.
-
-Create:
-
-```bash
 cat > /opt/ids-attacks/10_bruteforce_login.sh << 'EOF'
 #!/bin/bash
-
 TARGET="${1:-http://10.0.4.2}"
 
 echo "===== Brute force login/admin test ====="
-
 for password in admin password 123456 qwerty letmein changeme test root; do
     curl -s -o /dev/null -w "login password=$password -> %{http_code}\n" \
         -X POST \
         -d "username=admin&password=$password" \
         "$TARGET/admin/login"
 done
-
 echo "===== End brute force login/admin test ====="
 EOF
 
-chmod +x /opt/ids-attacks/10_bruteforce_login.sh
+chmod +x /opt/ids-attacks/*.sh
+ls -l /opt/ids-attacks
 ```
 
-Run:
+Useful run order on Debian attacker:
 
 ```bash
+/opt/ids-attacks/00_normal_activity.sh
+/opt/ids-attacks/01_sensitive_files.sh
+/opt/ids-attacks/02_admin_probe.sh
+/opt/ids-attacks/03_dangerous_methods.sh
+/opt/ids-attacks/04_directory_traversal.sh
+/opt/ids-attacks/05_injection_patterns.sh
+/opt/ids-attacks/06_404_scan.sh
+/opt/ids-attacks/07_common_sensitive_paths.sh
+/opt/ids-attacks/08_large_post.sh
+/opt/ids-attacks/09_rate_limit_burst.sh
 /opt/ids-attacks/10_bruteforce_login.sh
 ```
 
-Expected IDS result:
+## 2. Toolbox Reverse Proxy - IDS Scripts
 
-- repeated `403` or `404`;
-- `REPEATED FORBIDDEN` if NGINX returns `403`;
-- `DIRECTORY SCAN` if the route does not exist and returns `404`.
-
-## 7. Real-Time Monitoring Script Provided
-
-The provided monitor is now a full Bash script:
-
-```text
-/opt/monitor_realtime.sh
-```
-
-Create it on the reverse proxy, where `/var/log/nginx/access.log` exists:
+Copy and run this whole block on the Toolbox reverse proxy:
 
 ```bash
+mkdir -p /opt/ids-reports /var/log/nginx
+touch /var/log/nginx/access.log
+
 cat > /opt/monitor_realtime.sh << 'EOF'
 #!/bin/bash
 
@@ -784,53 +406,6 @@ while read -r line; do
 done < <(tail -n 0 -F "$LOG_FILE")
 EOF
 
-chmod +x /opt/monitor_realtime.sh
-```
-
-It detects:
-
-- flood / DoS based on request count in a time window;
-- dangerous HTTP methods;
-- sensitive paths;
-- SQL injection;
-- XSS;
-- path traversal;
-- command injection;
-- suspicious automated user-agents;
-- repeated 404 directory scans;
-- repeated forbidden/auth failures;
-- large request and rate limit status codes.
-
-Run:
-
-```bash
-/opt/monitor_realtime.sh
-```
-
-Optional custom log file:
-
-```bash
-/opt/monitor_realtime.sh /var/log/nginx/access.log
-```
-
-Stop:
-
-```text
-Ctrl+C
-```
-
-Expected result:
-
-- live colored alerts;
-- final statistics after stopping.
-
-## 8. Post-Mortem Log Analyzer (new)
-
-Milestone 3 requires an offline analyzer. This Bash script complements the real-time monitor by producing a report after the attacks.
-
-Create:
-
-```bash
 cat > /opt/analyze_logs.sh << 'EOF'
 #!/bin/bash
 
@@ -934,9 +509,7 @@ echo
 
 echo "[1] Top IPs"
 for ip in "${!TOTAL_BY_IP[@]}"; do
-    echo "${TOTAL_BY_IP[$ip]} $ip"
-done | sort -rn | head -10 | while read -r count ip; do
-    echo "- $ip: $count requests"
+    echo "- $ip: ${TOTAL_BY_IP[$ip]} requests"
 done
 echo
 
@@ -961,7 +534,7 @@ for key in "${!EXPLOITS[@]}"; do
     ip="${key%%:*}"
     attack="${key#*:}"
     echo "- $ip: $attack=${EXPLOITS[$key]}"
-done | sort
+done
 echo
 
 echo "[5] Sensitive path attempts"
@@ -984,31 +557,6 @@ for ip in "${!FLOOD_PEAK[@]}"; do
 done
 EOF
 
-chmod +x /opt/analyze_logs.sh
-```
-
-Run:
-
-```bash
-/opt/analyze_logs.sh /var/log/nginx/access.log
-```
-
-Expected result:
-
-- structured IDS report;
-- top IPs;
-- detected scans;
-- detected forbidden/admin failures;
-- exploit attempts;
-- flood indicators.
-
-## 9. Final Report Generator (new)
-
-This optional script saves the post-mortem analysis into a timestamped file.
-
-Create:
-
-```bash
 cat > /opt/generate_report.sh << 'EOF'
 #!/bin/bash
 
@@ -1018,148 +566,19 @@ TS="$(date +%Y%m%d-%H%M%S)"
 OUT_FILE="$OUT_DIR/ids-report-$TS.txt"
 
 mkdir -p "$OUT_DIR"
-
 /opt/analyze_logs.sh "$LOG_FILE" | tee "$OUT_FILE"
-
 echo
 echo "Report saved to: $OUT_FILE"
 EOF
 
-chmod +x /opt/generate_report.sh
+chmod +x /opt/monitor_realtime.sh /opt/analyze_logs.sh /opt/generate_report.sh
+ls -l /opt/monitor_realtime.sh /opt/analyze_logs.sh /opt/generate_report.sh
 ```
 
-Run:
-
-```bash
-/opt/generate_report.sh
-```
-
-Expected result:
-
-- report printed to terminal;
-- report saved in `/opt/ids-reports`.
-
-## 10. Test Plan
-
-Use three terminals on the reverse proxy/test environment.
-
-### Terminal 1 - Real-Time Monitor
+Useful run order on Toolbox reverse proxy:
 
 ```bash
 /opt/monitor_realtime.sh
-```
-
-### Terminal 2 - Raw NGINX Logs
-
-```bash
-tail -f /var/log/nginx/access.log
-```
-
-### Terminal 3 - Traffic Generation
-
-Run normal activity first:
-
-```bash
-/opt/ids-attacks/00_normal_activity.sh
-```
-
-Then run attacks one by one:
-
-```bash
-/opt/ids-attacks/01_sensitive_files.sh
-/opt/ids-attacks/02_admin_probe.sh
-/opt/ids-attacks/03_dangerous_methods.sh
-/opt/ids-attacks/04_directory_traversal.sh
-/opt/ids-attacks/05_injection_patterns.sh
-/opt/ids-attacks/06_404_scan.sh
-/opt/ids-attacks/07_common_sensitive_paths.sh
-/opt/ids-attacks/08_large_post.sh
-/opt/ids-attacks/09_rate_limit_burst.sh
-/opt/ids-attacks/10_bruteforce_login.sh
-```
-
-After the test:
-
-```bash
 /opt/analyze_logs.sh /var/log/nginx/access.log
 /opt/generate_report.sh /var/log/nginx/access.log
 ```
-
-## 11. Validation Matrix
-
-| Test | Script | Expected NGINX result | Expected IDS result |
-| --- | --- | --- | --- |
-| Normal browsing | `00_normal_activity.sh` | Mostly `200`, maybe low `404` | No critical attack alert |
-| Sensitive files | `01_sensitive_files.sh` | `403` or `404` | `SENSITIVE PATH` |
-| Admin probing | `02_admin_probe.sh` | `403` or `404` | `FORBIDDEN` or `DIRECTORY SCAN` |
-| Dangerous methods | `03_dangerous_methods.sh` | `403` or `405` | `DANGEROUS METHOD` |
-| Directory traversal | `04_directory_traversal.sh` | `400`, `403`, or `404` | `Path Traversal` |
-| Injection patterns | `05_injection_patterns.sh` | `200`, `403`, or `404` | `SQL Injection`, `XSS`, `Command Injection` |
-| 404 scan | `06_404_scan.sh` | many `404` | `DIRECTORY SCAN` |
-| Common sensitive paths | `07_common_sensitive_paths.sh` | `403` or `404` | `SENSITIVE PATH` |
-| Large POST | `08_large_post.sh` | `413` | `LARGE REQUEST` |
-| Burst / rate limit | `09_rate_limit_burst.sh` | `200` plus possible `503` | `FLOOD / DOS` |
-| Brute force | `10_bruteforce_login.sh` | repeated `403` or `404` | `REPEATED FORBIDDEN` or `DIRECTORY SCAN` |
-
-## 12. Detection Thresholds
-
-Current thresholds in `/opt/monitor_realtime.sh`:
-
-| Indicator | Threshold |
-| --- | --- |
-| Directory scan | `8` HTTP 404 responses |
-| Brute force / forbidden | `5` HTTP 401/403 responses |
-| Flood | `30` requests in `30` seconds |
-| Exploit escalation | `2` exploit attempts |
-
-These values are intentionally low for a classroom demo. In production, they should be tuned using baseline traffic.
-
-## 13. Limitations
-
-This IDS is useful for demonstration, but it has clear limits:
-
-- it only sees what NGINX logs;
-- it is not a packet-based IDS like Snort or Suricata;
-- long-running monitoring can produce false positives if thresholds are too low;
-- encrypted traffic is only visible after TLS termination at NGINX;
-- a skilled attacker can use slower attacks to avoid simple rate thresholds;
-- log rotation must be handled if monitoring runs for a long time.
-
-## 14. Improvements
-
-Possible improvements:
-
-- use sliding windows for 404 and forbidden counts;
-- add alert cooldowns to reduce repeated flood alerts;
-- export alerts to a file;
-- add JSON output for reports;
-- add IP allowlists for known test clients;
-- compare this log-based IDS with Snort or Suricata;
-- add Wireshark captures and correlate packets with NGINX logs.
-
-## 15. Demo Flow
-
-Recommended presentation flow:
-
-1. Show reverse proxy IP and NGINX log file.
-2. Start `/opt/monitor_realtime.sh`.
-3. Run `00_normal_activity.sh` and show normal alerts only.
-4. Run `01_sensitive_files.sh` and show sensitive path alerts.
-5. Run `05_injection_patterns.sh` and show exploit alerts.
-6. Run `09_rate_limit_burst.sh` and show flood/rate alerts.
-7. Stop the monitor with `Ctrl+C` and show final statistics.
-8. Run `/opt/generate_report.sh` and show the post-mortem report.
-
-## 16. Final Result Expected
-
-At the end of Milestone 3:
-
-- NGINX logs detailed HTTP requests;
-- normal traffic can be simulated;
-- malicious traffic can be simulated;
-- the real-time IDS detects attacks as they happen;
-- the post-mortem analyzer summarizes attacks after the test;
-- a final report can be generated;
-- the team has enough evidence for the presentation.
-
-
